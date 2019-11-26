@@ -5,8 +5,10 @@ import (
 	"sort"
 
 	"github.com/99designs/gqlgen/codegen/config"
+	"github.com/99designs/gqlgen/internal/code"
 	"github.com/pkg/errors"
 	"github.com/vektah/gqlparser/ast"
+	"golang.org/x/tools/go/packages"
 )
 
 // Data is a unified model of the code to be generated. Plugins may modify this structure to do things like implement
@@ -25,6 +27,9 @@ type Data struct {
 	QueryRoot        *Object
 	MutationRoot     *Object
 	SubscriptionRoot *Object
+
+	// This is important for looking up packages during code generation
+	NameForPackage code.NameForPackage
 }
 
 type builder struct {
@@ -51,14 +56,19 @@ func BuildData(cfg *config.Config) (*Data, error) {
 		return nil, err
 	}
 
-	err = cfg.Autobind(b.Schema)
+	cfg.InjectBuiltins(b.Schema)
+
+	ps, err := packages.Load(&packages.Config{Mode: packages.LoadTypes | packages.LoadSyntax}, append(cfg.Models.ReferencedPackages(), cfg.AutoBind...)...)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.InjectBuiltins(b.Schema)
+	err = cfg.Autobind(b.Schema, ps)
+	if err != nil {
+		return nil, err
+	}
 
-	b.Binder, err = b.Config.NewBinder(b.Schema)
+	b.Binder, err = b.Config.NewBinder(b.Schema, ps)
 	if err != nil {
 		return nil, err
 	}
@@ -75,12 +85,18 @@ func BuildData(cfg *config.Config) (*Data, error) {
 		}
 	}
 
+	pkgs, err := packages.Load(&packages.Config{Mode: packages.NeedName}, cfg.Models.ReferencedPackages()...)
+	if err != nil {
+		return nil, errors.Wrap(err, "loading failed")
+	}
+
 	s := Data{
-		Config:     cfg,
-		Directives: dataDirectives,
-		Schema:     b.Schema,
-		SchemaStr:  b.SchemaStr,
-		Interfaces: map[string]*Interface{},
+		Config:         cfg,
+		Directives:     dataDirectives,
+		Schema:         b.Schema,
+		SchemaStr:      b.SchemaStr,
+		Interfaces:     map[string]*Interface{},
+		NameForPackage: code.NewNameForPackage(pkgs),
 	}
 
 	for _, schemaType := range b.Schema.Types {

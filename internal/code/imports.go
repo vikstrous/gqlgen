@@ -14,8 +14,6 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-var nameForPackageCache = sync.Map{}
-
 var gopaths []string
 
 func init() {
@@ -51,21 +49,21 @@ func NameForDir(dir string) string {
 	return SanitizePackageName(filepath.Base(dir))
 }
 
-// ImportPathForDir takes a path and returns a golang import path for the package
-func ImportPathForDir(dir string) (res string) {
+// goModuleRoot returns the root of the current go module if there is a go.mod file in the directory tree
+// If not, it returns false
+func goModuleRoot(dir string) (string, bool) {
 	dir, err := filepath.Abs(dir)
 	if err != nil {
 		panic(err)
 	}
 	dir = filepath.ToSlash(dir)
-
 	modDir := dir
 	assumedPart := ""
 	for {
 		f, err := ioutil.ReadFile(filepath.Join(modDir, "go.mod"))
 		if err == nil {
 			// found it, stop searching
-			return string(modregex.FindSubmatch(f)[1]) + assumedPart
+			return string(modregex.FindSubmatch(f)[1]) + assumedPart, true
 		}
 
 		assumedPart = "/" + filepath.Base(modDir) + assumedPart
@@ -80,6 +78,21 @@ func ImportPathForDir(dir string) (res string) {
 		}
 		modDir = parentDir
 	}
+	return "", false
+}
+
+// ImportPathForDir takes a path and returns a golang import path for the package
+func ImportPathForDir(dir string) (res string) {
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		panic(err)
+	}
+	dir = filepath.ToSlash(dir)
+
+	modDir, ok := goModuleRoot(dir)
+	if ok {
+		return modDir
+	}
 
 	for _, gopath := range gopaths {
 		if len(gopath) < len(dir) && strings.EqualFold(gopath, dir[0:len(gopath)]) {
@@ -93,23 +106,41 @@ func ImportPathForDir(dir string) (res string) {
 var modregex = regexp.MustCompile("module (.*)\n")
 
 // NameForPackage returns the package name for a given import path. This can be really slow.
-func NameForPackage(importPath string) string {
+type NameForPackage struct {
+	cache    *sync.Map
+	packages []*packages.Package
+}
+
+// NewNameForPackage creates a NameForPackage
+func NewNameForPackage(packages []*packages.Package) NameForPackage {
+	return NameForPackage{
+		cache:    &sync.Map{},
+		packages: packages,
+	}
+}
+
+// Get returns the package name for a given import path. This can be really slow.
+func (n NameForPackage) Get(importPath string) string {
 	if importPath == "" {
 		panic(errors.New("import path can not be empty"))
 	}
-	if v, ok := nameForPackageCache.Load(importPath); ok {
+
+	if v, ok := n.cache.Load(importPath); ok {
 		return v.(string)
 	}
 	importPath = QualifyPackagePath(importPath)
-	p, _ := packages.Load(&packages.Config{
-		Mode: packages.NeedName,
-	}, importPath)
+	var p *packages.Package
+	for _, pkg := range n.packages {
+		if pkg.PkgPath == importPath {
+			p = pkg
+		}
+	}
 
-	if len(p) != 1 || p[0].Name == "" {
+	if p == nil || p.Name == "" {
 		return SanitizePackageName(filepath.Base(importPath))
 	}
 
-	nameForPackageCache.Store(importPath, p[0].Name)
+	n.cache.Store(importPath, p.Name)
 
-	return p[0].Name
+	return p.Name
 }
