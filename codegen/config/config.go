@@ -392,7 +392,20 @@ func (c *Config) normalize() error {
 
 	return nil
 }
-
+func (c *Config) isAutobind(pkg *packages.Package) bool {
+	for _, ab := range c.AutoBind {
+		if strings.HasSuffix(ab, "/...") {
+			abPrefix := strings.TrimSuffix(ab, "/...")
+			if strings.HasPrefix(pkg.PkgPath, abPrefix) {
+				return true
+			}
+		}
+		if pkg.PkgPath == ab {
+			return true
+		}
+	}
+	return false
+}
 func (c *Config) Autobind(s *ast.Schema, ps []*packages.Package) error {
 	if len(c.AutoBind) == 0 {
 		return nil
@@ -404,6 +417,9 @@ func (c *Config) Autobind(s *ast.Schema, ps []*packages.Package) error {
 		}
 
 		for _, p := range ps {
+			if !c.isAutobind(p) {
+				continue
+			}
 			if t := p.Types.Scope().Lookup(t.Name); t != nil {
 				c.Models.Add(t.Name(), t.Pkg().Path()+"."+t.Name())
 				break
@@ -421,6 +437,9 @@ func (c *Config) Autobind(s *ast.Schema, ps []*packages.Package) error {
 			}
 
 			for _, p := range ps {
+				if !c.isAutobind(p) {
+					continue
+				}
 				if p.Name != pkg {
 					continue
 				}
