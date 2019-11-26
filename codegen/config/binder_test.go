@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/vektah/gqlparser"
 	"github.com/vektah/gqlparser/ast"
+	"golang.org/x/tools/go/packages"
 )
 
 func TestBindingToInvalid(t *testing.T) {
@@ -58,7 +59,12 @@ func createBinder(cfg Config) (*Binder, *ast.Schema) {
 		}
 	`})
 
-	b, err := cfg.NewBinder(s)
+	ps, err := packages.Load(&packages.Config{Mode: packages.LoadTypes | packages.LoadSyntax}, cfg.Models.ReferencedPackages()...)
+	if err != nil {
+		panic(err)
+	}
+
+	b, err := cfg.NewBinder(s, ps)
 	if err != nil {
 		panic(err)
 	}

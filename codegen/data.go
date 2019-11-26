@@ -7,6 +7,7 @@ import (
 	"github.com/99designs/gqlgen/codegen/config"
 	"github.com/pkg/errors"
 	"github.com/vektah/gqlparser/ast"
+	"golang.org/x/tools/go/packages"
 )
 
 // Data is a unified model of the code to be generated. Plugins may modify this structure to do things like implement
@@ -51,14 +52,19 @@ func BuildData(cfg *config.Config) (*Data, error) {
 		return nil, err
 	}
 
-	err = cfg.Autobind(b.Schema)
+	cfg.InjectBuiltins(b.Schema)
+
+	ps, err := packages.Load(&packages.Config{Mode: packages.LoadTypes | packages.LoadSyntax}, append(cfg.Models.ReferencedPackages(), cfg.AutoBind...)...)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.InjectBuiltins(b.Schema)
+	err = cfg.Autobind(b.Schema, ps)
+	if err != nil {
+		return nil, err
+	}
 
-	b.Binder, err = b.Config.NewBinder(b.Schema)
+	b.Binder, err = b.Config.NewBinder(b.Schema, ps)
 	if err != nil {
 		return nil, err
 	}

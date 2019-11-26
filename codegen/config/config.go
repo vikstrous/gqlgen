@@ -385,13 +385,9 @@ func (c *Config) normalize() error {
 	return nil
 }
 
-func (c *Config) Autobind(s *ast.Schema) error {
+func (c *Config) Autobind(s *ast.Schema, ps []*packages.Package) error {
 	if len(c.AutoBind) == 0 {
 		return nil
-	}
-	ps, err := packages.Load(&packages.Config{Mode: packages.LoadTypes}, c.AutoBind...)
-	if err != nil {
-		return err
 	}
 
 	for _, t := range s.Types {
